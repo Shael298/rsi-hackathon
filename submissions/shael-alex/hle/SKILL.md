@@ -1,9 +1,9 @@
 ---
 name: hle-exact-answer-sop
 description: >
-  ZQ7-DESC Mandatory procedure for answering an expert exam question in this
-  container. Defines the exact answer format the grader matches against and the
-  turn budget. Read and follow it before answering; the wrong format scores zero.
+  ZQ7-DESC Required procedure for answering an expert exam question in this
+  container. Gives the exact output path and answer format the grader reads, and
+  what to do when the question depends on an image you cannot see.
 triggers:
   - question
   - answer
@@ -13,6 +13,8 @@ triggers:
   - prove
   - compute
   - calculate
+  - chemistry
+  - engineering
   - task
   - respond
   - write
@@ -24,62 +26,81 @@ triggers:
 
 ZQ7-BODY
 
-One question, one answer. A model grader compares your **final answer only** against a
-reference answer. Your reasoning is not scored; an answer in the wrong format scores
-zero even when the reasoning is right.
+## The one thing that must happen
 
-## Step 1 — read the question, and check for an image
+Write your answer to **`/logs/agent/response.txt`** in exactly this format:
+
+```
+Explanation: <your reasoning>
+Answer: <your final answer>
+Confidence: <number>%
+```
+
+The line must read `Answer:` — not `Final answer`, not `Exact Answer`, not `####`.
+A grader compares **the `Answer:` line alone** against a reference. Your explanation is
+not scored. A correct result in the wrong format scores zero.
 
 ```sh
-cat instruction.md 2>/dev/null; cat question.txt 2>/dev/null; ls /app 2>/dev/null
+mkdir -p /logs/agent && cat > /logs/agent/response.txt <<'EOF'
+Explanation: ...
+Answer: ...
+Confidence: 70%
+EOF
 ```
 
-**You cannot see images.** If the question depends on an image (`/app/image.png` or
-similar) and the text alone is not sufficient, do not burn turns trying to decode it.
-Reason from whatever the text does say, commit to your single best guess, write it in
-the required format, and stop. A guess scores sometimes; no answer scores never.
-
-## Step 2 — solve it
-
-- Identify what kind of answer is wanted **before** solving: a number, an exact
-  expression, a single word or name, a multiple-choice letter, a chemical formula.
-- Work the problem out in your response. Use the terminal for any arithmetic rather
-  than doing it in your head:
+## Step 1 — read the question
 
 ```sh
-python3 -c "import math; print(...)"
+cat /app/instruction.md
 ```
 
-- Check units, and check that the magnitude is plausible.
-- If you get stuck, do not stall and do not run out of turns. Narrow it down, pick the
-  most defensible candidate, and answer. **Never end without an answer.**
+## Step 2 — check whether it needs an image
 
-## Step 3 — output in exactly this format
+**You cannot see images.** Roughly one question in four refers to one.
 
-Follow whatever format the task instruction specifies. If it specifies none, use:
+If the question depends on a figure, diagram, spectrum or structure you cannot read,
+**do not spend turns on it.** Answer immediately from whatever the text gives you:
 
+- **Multiple choice → always output a letter.** Never leave it blank and never say you
+  cannot see the image. A guess is worth real expected points; an abstention is worth
+  zero. Use any constraint in the text to eliminate options first, then pick.
+- **Open-ended → give the most probable answer** for that subject and phrasing, in the
+  form the question asks for.
+
+Then write the file and stop. Never write "I cannot see the image" as the answer.
+
+## Step 3 — solve it
+
+Decide the **answer type before you start**: a number, an exact expression, a name, a
+formula, a single letter.
+
+- Do arithmetic in the terminal, not in your head:
+  `python3 -c "import math; print(...)"`
+- Check units and whether the magnitude is plausible.
+- Multiple choice: eliminate, then commit. Never answer "none of the above" unless it
+  is offered and you are sure.
+- If you get stuck, do **not** stall or run out of turns. Narrow it down, take the most
+  defensible candidate, write it. **Never finish without an answer.**
+
+## Step 4 — the `Answer:` line
+
+Most answers are matched near-exactly, so the form matters as much as the content:
+
+- The answer alone. No restated question, no "approximately", no trailing sentence,
+  no units unless the question asked for units.
+- Multiple choice → **the letter only** (`C`), not the letter plus the option text.
+- Numbers → the precision the question asked for. Keep exact form (fraction, surd,
+  symbolic constant) when the question is exact; round only when told to.
+- Names and technical terms → the standard spelling used in that field.
+- Chemistry → the conventional notation for what was asked (formula, IUPAC name,
+  structure descriptor) — whichever the question actually requested.
+- Several values asked for → in the order asked, comma-separated.
+
+## Step 5 — verify, then stop
+
+```sh
+cat /logs/agent/response.txt
 ```
-Explanation: <two or three sentences, the key steps only>
 
-Exact Answer: <the answer, and nothing else>
-
-Confidence: <0-100>%
-```
-
-Rules for the `Exact Answer` line:
-
-- The answer alone. No restated question, no units unless the question asked for
-  units, no "approximately", no trailing sentence.
-- Multiple choice → the letter only.
-- A number → match the precision the question asked for. Give exact form
-  (fraction, surd, symbolic constant) when the question is exact; round only when
-  asked to.
-- A name or term → the standard form, spelled as the field spells it.
-- One answer. If the question asks for several, give them in the order asked,
-  separated by commas.
-
-## Step 4 — verify, then stop
-
-Re-read the `Exact Answer` line against the question one last time: does it answer
-*what was asked*, in *the form asked for*? Fix it if not. Then stop — do not keep
-working after the answer is written.
+Confirm the file exists, has all three lines, and that `Answer:` holds the answer in
+the requested form. Fix it if not, then stop.

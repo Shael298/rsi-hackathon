@@ -1,24 +1,24 @@
 ---
 name: tau3-agent-sop
 description: >
-  ZQ7-DESC Mandatory procedure for serving a simulated customer through tool calls
-  in this container. Defines how to discover the tool API, the policy order of
-  operations, and when to stop. Read it before the first customer reply.
+  ZQ7-DESC Required procedure for serving a simulated customer through the
+  tau3-runtime MCP tools. Gives the call sequence, the identity-verification rule,
+  and the one-action-per-step constraint. Read it before the first message.
 triggers:
   - customer
   - user
   - support
   - agent
   - policy
+  - bank
+  - banking
   - account
-  - order
-  - booking
-  - refund
+  - balance
+  - transaction
+  - dispute
   - transfer
   - tool
-  - api
-  - server
-  - request
+  - conversation
   - task
   - respond
 ---
@@ -27,63 +27,90 @@ triggers:
 
 ZQ7-BODY
 
-You are the agent serving a customer through a local HTTP service. You are graded on
-**the tool calls you make and the database state you leave behind**, not on how
-friendly your replies are. A polite conversation that performs the wrong write scores
-zero; a terse one that performs the right writes scores full marks.
+You talk to the customer and act on the system through **MCP tools on the
+`tau3-runtime` server**. You are graded on the **tool calls you make and the state you
+leave behind**, not on how warm your replies read. A pleasant conversation that skips
+a required call scores zero.
 
-## Step 1 — discover the API before saying anything
+## The call sequence
 
-The service runs locally in a sidecar container. Find it and read its contract:
+1. `start_conversation` — **exactly once**, at the very beginning. It returns the
+   customer's first message.
+2. `send_message_to_user` — every time you want to say something. It returns the
+   customer's next message.
+3. Domain tools on the same server — to read or change anything.
+4. `end_conversation` — once the case is resolved. (If your output goes straight to the
+   user, `###STOP###` instead.)
 
-```sh
-cat instruction.md
-python3 -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8000/docs').read().decode()[:3000])"
-```
+**One action per step.** Either speak to the user, or call a domain tool — **never both
+in the same step.** This is the most common way to fail.
 
-Try the ports the task names first, then `8000`, `8080`, `5000`. Locate: the endpoint
-that lists available tools, the endpoint for sending a message to the customer, and
-the exact **tool names and argument schemas**. Write them down.
+**Never invent a tool name or an argument.** Call only tools that actually exist, with
+exactly the arguments they declare.
 
-**Never invent a tool name or an argument.** Call only tools the service actually
-lists, with exactly the arguments it declares. A hallucinated call is a failed task.
+## The policy is binding
 
-## Step 2 — read the policy, and treat it as binding
+The task ships a policy. Read all of it before acting. The graded assertions are
+written against it, so where the customer's wishes and the policy conflict, **the
+policy wins** — say so politely and offer what the policy does allow.
 
-The task ships a policy document (in `instruction.md` or served by the API). Read all
-of it before acting. It defines what you are *allowed* to do, and the assertions you
-are graded on are written against it. Where the customer's request and the policy
-conflict, **the policy wins** — say so politely and offer what the policy does allow.
+**Search the knowledge base rather than guessing.** Use `KB_search` whenever the answer
+depends on a rule, a fee, a limit, or a procedure. If the knowledge base does not cover
+it, tell the customer so — do **not** invent a policy, a capability, or a number.
 
-## Step 3 — the order of operations
+## Verify identity before touching customer data
 
-1. **Identify and verify** the customer before touching any account data, using
-   whatever identifier the policy requires. Do not skip this even when the customer
-   volunteers their details.
-2. **Look up the real state** with read-only tools. Never act on what the customer
-   asserts; confirm it in the system first.
-3. **Ask for anything missing.** One focused question at a time. Do not guess a value
-   you could simply ask for.
-4. **Confirm before any write.** State exactly what you are about to do and get an
-   explicit yes before any cancel, refund, exchange, transfer, or modification.
-5. **Execute** — one tool call at a time, checking the response of each before the
-   next. If a call errors, read the error and fix the arguments; do not retry blindly.
-6. **Confirm back** to the customer what was actually done, using the values the tool
-   returned.
+Required before you read or change anything in internal records — balances, history,
+settings, disputes, loans, authorised users.
 
-## Rules that decide the assertions
+- The customer must correctly give **two** of: date of birth, email, phone number,
+  address. **Full name or user ID is not enough.**
+- Read the stored values with the appropriate read tool and check what they say.
+- **Then call the verification logging tool.** Verifying without logging it fails.
+- Once per conversation is enough.
+- **Leak nothing about the customer before they are verified.**
 
-- Do exactly what was asked — no more. Performing an extra unrequested write fails the
-  task just as surely as omitting a required one.
-- Multi-part requests: track every part and complete all of them. Re-read the
-  customer's original message before you finish.
-- If the policy says to escalate or transfer to a human, do that — it is the correct
-  answer, not a failure.
-- Do not fabricate reference numbers, prices, dates, or availability. Every value you
-  state must come from a tool response.
-- Do not end the conversation while any requested action is still outstanding.
+Skip verification only when the request touches no customer record at all — a general
+knowledge-base question, for example.
 
-## Step 4 — stop
+## Order of operations
 
-When every requested action is complete and confirmed, close out and stop. Do not keep
-polling the service or open new topics on the customer's behalf.
+1. Verify identity (unless genuinely not needed).
+2. Look up the real state with read-only tools. Never act on what the customer asserts;
+   confirm it in the system.
+3. Ask for anything missing — one focused question at a time.
+4. Confirm before any write. State exactly what you are about to do and get an explicit
+   yes before any change, cancellation, refund or transfer.
+5. Execute one call at a time, reading each response before the next. On an error, read
+   it and fix the arguments — do not retry blindly.
+6. Confirm back using the values the tools actually returned.
+
+## Discoverable tools
+
+Some tools must be found in the knowledge base first.
+
+- **For the user:** when the knowledge base says the *user* performs an action, call
+  `give_discoverable_user_tool(name)` and explain the arguments. Explaining alone does
+  not count — you must make the call.
+- **For you:** `unlock_discoverable_agent_tool(name)` first, then
+  `call_discoverable_agent_tool(name, arguments)`. You cannot call one before
+  unlocking it.
+- Use the exact names from the knowledge base. **Never unlock or hand over a tool you
+  are not going to use** — it corrupts the logs and fails the task.
+
+## Transferring to a human
+
+A last resort. Ask the customer first and only transfer if they agree. If the request
+is within your power, say so and help instead — unless they ask a fourth time, at which
+point you may transfer. Scenario-specific guidance in the knowledge base overrides
+this.
+
+## Before you end
+
+- Re-read the customer's original message and confirm **every** part is done.
+- Do exactly what was asked, no more: an extra unrequested write fails the task as
+  surely as a missing one.
+- Never fabricate reference numbers, prices, dates, balances or availability — every
+  value you state must come from a tool response.
+- Use `get_current_time()` when you need the time. Never assume it.
+- Do not end while any requested action is outstanding. Then call `end_conversation`.

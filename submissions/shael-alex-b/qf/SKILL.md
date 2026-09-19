@@ -1,9 +1,9 @@
 ---
 name: qf-sandbox-sop
 description: >
-  ZQ7-DESC Mandatory procedure for solving a quantitative-finance task in this
-  sandbox. Defines the output contract, the offline library set, and the
-  self-check to run before finishing. Read it before writing any code.
+  ZQ7-DESC Required procedure for solving a quantitative-finance task in this
+  sandbox. Gives the input and output locations, how the verifier grades, and the
+  completeness checklist that decides pass or fail. Read it before writing code.
 triggers:
   - finance
   - quantitative
@@ -15,11 +15,13 @@ triggers:
   - risk
   - data
   - csv
+  - json
   - compute
   - calculate
   - python
+  - pandas
   - script
-  - test
+  - output
   - task
   - solve
   - write
@@ -30,81 +32,88 @@ triggers:
 
 ZQ7-BODY
 
-A hidden test suite reads the **files you write**. Nothing else is scored — not your
-explanation, not what you print to the terminal. Getting the output contract right is
-most of the score.
+## How you are graded
 
-## Step 1 — extract the output contract before writing any code
+A hidden test suite reads **the files you write**, and **every check must pass** — there
+is no partial credit. Your explanation and your terminal output are not scored.
+
+That has one dominant consequence: **a missing or misnamed output file guarantees
+zero.** The verifier is deliberately forgiving about presentation — CSV row order,
+JSON key order, number formatting, blank vs null are all accepted — but it cannot
+forgive a file that is not there. **Completeness beats polish. Always.**
+
+Inputs are normally under `/app/data/`. Outputs normally go to `/app/output/`, which
+**you may have to create**.
+
+## Step 1 — build the output checklist before writing any code
 
 ```sh
-cat instruction.md
-ls -la
+cat instruction.md 2>/dev/null || cat /app/instruction.md
+ls -la /app/data/ 2>/dev/null
+mkdir -p /app/output
 ```
 
-Write down, explicitly, before you start:
+The instruction lists the required outputs exactly. Write the list down before you
+start, and for each file record:
 
-- **Every output file**: its exact name and directory.
-- **Its format**: CSV (which column names, which order, is there a header?), JSON
-  (which keys?), or a plain number.
-- **Precision and units**: decimal places, percent vs fraction, basis points,
-  annualised vs periodic. This is the most common silent failure — a correct number in
-  the wrong unit scores zero.
-- **Index/ordering**: sort order, date format, whether an index column is included.
+- **The exact filename** and directory, spelled exactly as the instruction spells it.
+- **Every required column**, in the order given — or **every required JSON key**.
+- **Units and convention**: percent vs fraction, annualised vs periodic, basis points,
+  log vs simple returns, sample vs population (`ddof`). A right number in the wrong
+  convention fails.
 
-If the instruction is ambiguous about format, mirror the format of the **input** data.
+Do not start computing until that checklist exists. Keep it visible and tick it off.
 
-## Step 2 — inspect the real data before computing on it
+## Step 2 — look at the real data
 
 ```sh
-head -5 <input-file>; wc -l <input-file>
+head -5 /app/data/<file>; wc -l /app/data/<file>
 ```
 
-Check for: missing values, non-trading days, date parsing, the column you actually
-need versus the one with a similar name. Never assume the schema.
+Check the delimiter (`.tsv` is tab-separated, `.csv` is comma), the real column names,
+date formats, missing values, and duplicate rows. Never assume the schema.
 
-## Step 3 — write a script, do not compute in your head
+## Step 3 — write a script
 
-Available offline: the **standard library**, plus `numpy`, `scipy`, `pandas` if the
-image has them. **There is no network — `pip install` will fail. Do not attempt it.**
-Check first and adapt rather than fail:
+Use the standard library plus `numpy`, `scipy`, `pandas`. **There is no network:
+`pip install` will fail — do not try it.** Confirm what you have, then adapt:
 
 ```sh
-python3 -c "import numpy, pandas, scipy; print('ok')"
+python3 -c "import numpy, pandas; print('ok')"
 ```
 
-Put the work in a file (`solution.py`), not a one-liner, so you can re-run it after a
-fix. Guard the maths explicitly:
+Put the work in `/app/solution.py` so you can re-run it after a fix, and run it with
+`python3 /app/solution.py`. Guard the usual traps: align series on keys or dates rather
+than position, handle empty groups and division by zero instead of emitting `NaN` or
+`inf`, and apply every filter the instruction asks for — counting each excluded row
+exactly once when an audit count is required.
 
-- Use the sample vs population convention the task asks for (`ddof`).
-- Annualise with the right period count (252 trading days, 12 months, 4 quarters) —
-  and only if asked.
-- Use log vs simple returns as specified; do not substitute one for the other.
-- Align series on dates before any pairwise computation; never rely on positional
-  alignment.
-- Handle division by zero and empty windows rather than emitting `nan` or `inf`.
+## Step 4 — write every required file, even the imperfect ones
 
-## Step 4 — test your own output before finishing
+Work through the checklist from Step 1 in order. If one quantity is defeating you,
+**still write its file** with your best computed values and move on — an approximate
+value may pass a semantic check, while an absent file cannot. Never stop after the
+easy outputs. Never delete or rename an output you have already written.
 
-Write a small check and run it. This is the step that converts a near-miss into a pass:
+## Step 5 — verify against the checklist, then stop
 
 ```sh
-python3 solution.py
-cat <output-file>
+ls -la /app/output/
 python3 - <<'PY'
-# re-read the output exactly as a grader would, and assert its shape
-import pandas as pd
-df = pd.read_csv("<output-file>")
-print(df.columns.tolist(), df.shape)
-print(df.head())
-assert not df.isnull().values.any(), "output contains nulls"
+import json, pathlib, pandas as pd
+for p in sorted(pathlib.Path("/app/output").iterdir()):
+    if p.suffix == ".csv":
+        df = pd.read_csv(p)
+        print(p.name, df.shape, list(df.columns))
+        print("   nulls:", int(df.isnull().values.sum()))
+    elif p.suffix == ".json":
+        print(p.name, "keys:", sorted(json.loads(p.read_text())))
 PY
 ```
 
-Confirm, item by item, against the contract from Step 1: file exists at the right
-path, correct columns in the correct order, correct row count, no `NaN`/`inf`, values
-in a plausible range, precision as specified.
+Confirm, item by item: every file on the checklist exists, every required column or key
+is present and named exactly right, row counts are sensible, no unintended `NaN`/`inf`,
+and values fall in a plausible range. Fix anything that fails, re-run, re-check.
 
-## Step 5 — stop
-
-Once the output file exists and passes your own check, stop. Do not refactor, do not
-add features the task did not ask for, and do not delete or rename the output file.
+When the checklist is complete, stop. Do not refactor and do not add outputs nobody
+asked for.

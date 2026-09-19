@@ -1,9 +1,9 @@
 ---
 name: health-consult-sop
 description: >
-  ZQ7-DESC Mandatory procedure for answering a health question in this container.
-  Defines the required output file and the answer structure the grader scores.
-  Read and follow it before writing anything; skipping it loses points.
+  ZQ7-DESC Required procedure for replying to a health conversation in this
+  container. Gives the exact output path, how the rubric grader scores, and the
+  three conversation types with what each one must contain. Follow it exactly.
 triggers:
   - health
   - medical
@@ -14,73 +14,105 @@ triggers:
   - medication
   - treatment
   - diagnosis
+  - conversation
+  - reply
+  - respond
   - question
   - answer
-  - respond
   - task
   - write
   - file
 ---
 
-# Health consultation — required procedure
+# Health conversation — required procedure
 
 ZQ7-BODY
 
-You have **4 turns and 5 minutes**. That is the binding constraint. Do not explore the
-filesystem, do not install anything, do not search. Write the answer first.
+## The one thing that must happen
 
-## Turn 1 — write the complete answer
+Write the reply to **`/logs/agent/response.txt`** — that absolute path, nothing else.
+The file must contain **only the reply**: no preamble, no "Here is my response", no
+markdown fences around it, no `#### answer` line.
 
-Write your **entire final answer** to the output file named in the task instruction
-(this is normally `response.txt` in your working directory). Use a heredoc so it lands
-in one command:
+You have **4 turns**. Write the file on turn 1. Do not explore the filesystem, do not
+install anything.
 
 ```sh
-cat > response.txt <<'EOF'
-<your full answer here>
+mkdir -p /logs/agent && cat > /logs/agent/response.txt <<'EOF'
+<the reply, and nothing else>
 EOF
 ```
 
-Plain prose with short headers. No `####` answer line, no JSON, no markdown code
-fences around the answer itself.
+## How you are scored
 
-## The answer must contain all six of these
+A grader checks your reply against a list of independent rubric items, one at a time,
+and your score is `points you earned ÷ total available points`. Three consequences,
+and they drive everything below:
 
-A model grader scores your response against a checklist. Each element it cannot find
-is a point lost, so cover every one, in this order:
+1. **Each item is judged separately, so coverage wins.** A reply that touches eight
+   relevant things scores higher than a beautifully written one that covers three.
+2. **Some items carry negative points** — being overly verbose, padding, hedging
+   instead of answering, giving unsafe advice. These *subtract*. Do not inflate length
+   to seem thorough; every sentence must add a distinct fact.
+3. **Compound items are all-or-nothing.** If a criterion names several things, partial
+   coverage scores zero for it. When you make a point, complete it.
 
-1. **Direct answer first.** Open with the actual answer to what was asked, in one or
-   two sentences. Never open with a disclaimer.
-2. **The reasoning behind it.** Briefly say *why* — the mechanism, the typical cause,
-   or what the evidence generally shows.
-3. **Context that changes the answer.** State what you are assuming, and how the answer
-   would differ for the obvious variations (age, pregnancy, existing conditions,
-   current medications). If the question is genuinely ambiguous, answer the most likely
-   reading *and* name the alternative — do not answer with a question alone.
-4. **Red flags and when to seek care.** Name the specific symptoms that mean urgent or
-   emergency care, and say plainly which level of care applies. If anything in the
-   question is a genuine emergency, this moves to the very top.
-5. **Concrete next steps.** What the person should actually do next, specifically
-   enough to act on.
-6. **Calibrated limits.** One short line on uncertainty and on seeing a clinician for
-   anything individualised. One line, at the end — not a paragraph, and not at the top.
+## Step 1 — classify the conversation. This decides the shape of the reply.
 
-## Style rules
+Read the whole conversation, including earlier assistant turns. Then pick one:
 
-- Write to the reader's level. If they use lay terms, answer in lay terms; define any
-  clinical term you use.
-- Be specific. "See a doctor" scores nothing; "see a doctor within 24 hours if the
-  fever goes above 39°C or you develop a stiff neck" scores.
-- State uncertainty honestly, but still commit to a best answer. Hedging everything
-  scores worse than a clear answer with a stated caveat.
-- Never refuse a general health question. Answer it and add the safety framing.
-- Aim for 250–500 words. Longer dilutes; shorter drops checklist items.
+### A. Key information is missing (the most common case)
 
-## Turn 2 — verify, then stop
+The user's request cannot be answered safely or correctly without facts they have not
+given — age, duration, severity, pregnancy, existing conditions, current medications,
+what they have already tried.
+
+**Do both of these. Doing only one loses most of the points.**
+- **Ask the specific missing questions.** Not "tell me more" — name the exact facts you
+  need and why each one changes the answer.
+- **Give conditional guidance anyway.** Cover the likely branches: *if it's this, then
+  that; if instead it's the other, then this.* Never answer with questions alone, and
+  never assume a fact and answer as if it were given.
+
+### B. There are red flags, or the user may need urgent care
+
+**Lead with it.** State plainly what level of care is needed and how fast —
+emergency services now, same-day, within a few days, routine. Name the specific
+symptoms that mean escalate immediately. Do not bury this under caveats, and do not
+make urgent care sound optional. Then answer the rest of the question.
+
+### C. The user asked for a specific piece of work
+
+A summary, a comparison, a document written for a particular reader, data interpreted,
+something structured. **Follow the stated format and audience exactly** — if they asked
+for a table give a table, if they asked for a patient-facing letter write it at that
+reading level, if they named a length respect it. Getting the requested form right is
+most of the score here.
+
+Many conversations are more than one of these. Handle every type that applies.
+
+## Step 2 — cover these, in a sensible order
+
+- **Answer the actual question first.** Never open with a disclaimer.
+- **Say why** — the mechanism or the usual cause, briefly.
+- **State your assumptions**, and how the answer changes if they are wrong.
+- **Red flags and when to seek care**, specifically enough to act on.
+- **Concrete next steps** — what to do, in what order.
+- **One short line on limits**, at the end. One line, never a paragraph, never at the top.
+
+## Style
+
+- Match the user's language and reading level. Define any clinical term you use.
+- Be specific: "see a doctor" earns nothing; "see a doctor within 24 hours if the fever
+  passes 39°C or a stiff neck develops" earns.
+- Commit to a best answer even under uncertainty. Say what is uncertain once, plainly.
+- Never refuse a general health question, and never tell the user only to see a doctor.
+- Roughly 250–500 words. Shorter drops items; longer risks the verbosity penalty.
+
+## Step 3 — verify, then stop
 
 ```sh
-wc -c response.txt && head -5 response.txt
+wc -c /logs/agent/response.txt && head -3 /logs/agent/response.txt
 ```
 
-If the file exists and is non-empty, **stop**. Do not revise, do not add turns.
-If it is empty or missing, rewrite it immediately with the heredoc above.
+Non-empty at that exact path → **stop**. Empty or missing → rewrite immediately.
