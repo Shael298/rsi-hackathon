@@ -96,13 +96,18 @@ The learner container's egress is allowlisted to the metering gateway only.
 **No `pip install`, no network, no downloads.** Rely on the standard library plus
 whatever the task image already has. Helper scripts must be pure and self-contained.
 
-Do **not** hardcode the skill's absolute mount path — it comes from
-`harbor.models.trial.paths.EnvironmentPaths().default_skills_dir` and is unconfirmed.
-Have scripts locate themselves:
+**Confirmed container paths** (read out of `harbor.models.trial.paths.EnvironmentPaths`):
 
-```sh
-SKILL_DIR="$(dirname "$(find / -name SKILL.md -path '*stbench-skill*' 2>/dev/null | head -1)")"
-```
+| path | what |
+|---|---|
+| `/harbor/skills/stbench-skill/` | **your skill folder**, mounted read-only |
+| `/logs/agent/` | agent output dir — `response.txt` is read from here |
+| `/tests/` | the verifier's files. **Not visible to the learner.** Do not write rules that assume it can read them |
+| `/logs/verifier/reward.json` | where the score lands |
+| `/app/` | task workspace — `instruction.md`, `data/`, `output/` |
+
+So a helper script ships as `/harbor/skills/stbench-skill/<name>.py` and is run with
+`python3 /harbor/skills/stbench-skill/<name>.py`.
 
 ---
 
@@ -151,6 +156,35 @@ the edit.
 ---
 
 ## 3. Phase 0 — Setup (once)
+
+### This machine runs the stack inside WSL, not on Windows
+
+There is no Docker Desktop here. Docker Engine + Compose v2 are installed in the WSL2
+Ubuntu distro, and **every `stbench eval` must run from inside WSL** — the Windows
+`.venv` has no Docker to talk to. Two gotchas already cost a run each:
+
+- `docker.io` alone is **not enough**: without the `docker-compose-v2` package,
+  `docker compose` falls through to `docker` and every trial dies with
+  `unknown flag: --project-name`.
+- `dockerd` does not survive a WSL restart. Run `sudo service docker start` first.
+- Never pass a multi-line or `$VAR`-bearing command through `wsl -d Ubuntu -- bash -lc
+  "..."` from PowerShell — PowerShell mangles `$HOME` and `$PATH`. **Put it in a `.sh`
+  file and run `wsl -d Ubuntu -- bash /mnt/c/.../script.sh`.**
+
+The Linux venv is kept separate from the Windows one so the two do not clobber each
+other:
+
+```sh
+export PATH="$HOME/.local/bin:$PATH"
+export UV_PROJECT_ENVIRONMENT=.venv-linux
+cd /mnt/c/Users/alexg/Documents/computer/hackathon/rsi-hackathon
+sudo service docker start
+uv sync
+```
+
+`check-skill`, `tasks` and `data pull` need no Docker and can run from either side.
+
+### Then
 
 ```sh
 uv sync
